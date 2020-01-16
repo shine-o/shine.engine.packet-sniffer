@@ -14,17 +14,17 @@ import (
 )
 
 /**
-	2016 files packet sniffer
-	Services:
-		- Login
-			- Client port: 9010
-		- World Manager
-			- Client port: 9110, 9120
-		- Zone 1
+2016 files packet sniffer
+Services:
+	- Login
+		- Client port: 9010
+	- World Manager
+		- Client port: 9110, 9120
+	- Zone 1
 
- */
+*/
 
-var knownServices 	=	make(map[int]string)// port => serviceName
+var knownServices = make(map[int]string) // port => serviceName
 
 func init() {
 
@@ -43,7 +43,7 @@ func init() {
 
 type PacketFlow struct {
 	pfm map[string][]gopacket.Packet
-	m sync.Mutex
+	m   sync.Mutex
 }
 
 func main() {
@@ -74,9 +74,8 @@ func main() {
 	listen(ctx, pf)
 }
 
-
 func listen(ctx context.Context, pf *PacketFlow) {
-	if handle, err := pcap.OpenLive("\\Device\\NPF_{8370AD1B-8C9E-4E23-A4F2-9DF538CFDED4}", 1600, true, pcap.BlockForever); err != nil {
+	if handle, err := pcap.OpenLive("\\Device\\NPF_{3904F81A-F9DE-4578-B4C6-8626CE9B78CE}", 1600, true, pcap.BlockForever); err != nil {
 		panic(err)
 		//} else if err := handle.SetBPFFilter("(src net 192.168.1.184 or dst net 192.168.1.250) and (dst portrange 9000-9600 or src portrange 9000-9600)"); err != nil {  //
 	} else if err := handle.SetBPFFilter("dst portrange 9000-9600 or src portrange 9000-9600"); err != nil { //
@@ -90,13 +89,13 @@ func listen(ctx context.Context, pf *PacketFlow) {
 }
 
 // asses the package flow, either Client-Service or Service-Client
-func (pf * PacketFlow) add(p gopacket.Packet) {
+func (pf *PacketFlow) add(p gopacket.Packet) {
 	src, _ := strconv.Atoi(p.TransportLayer().TransportFlow().Src().String())
 	dst, _ := strconv.Atoi(p.TransportLayer().TransportFlow().Dst().String())
 
 	var fkey string
 
-	if src  >= 9000 && src <= 9600 {
+	if src >= 9000 && src <= 9600 {
 		// server - client
 		fkey = fmt.Sprintf("%v-Client.pcapng", knownServices[src])
 	} else {
@@ -114,23 +113,23 @@ func (pf * PacketFlow) add(p gopacket.Packet) {
 }
 
 // write to disk pcapng files for each flow in the map
-func (pf * PacketFlow) persist()  {
+func (pf *PacketFlow) persist() {
 	for k, v := range pf.pfm {
-			f, err := os.Create(k)
-			if err != nil {
-				fmt.Println(err)
-			}
+		f, err := os.Create(k)
+		if err != nil {
+			fmt.Println(err)
+		}
 
-			r, err := pcapgo.NewNgWriter(f, layers.LinkTypeEthernet)
+		r, err := pcapgo.NewNgWriter(f, layers.LinkTypeEthernet)
 
-			if err != nil {
-				fmt.Println(err)
-			}
+		if err != nil {
+			fmt.Println(err)
+		}
 
-			for _, p := range v {
-				err = r.WritePacket(p.Metadata().CaptureInfo, p.Data())
-			}
-			r.Flush()
-			f.Close()
+		for _, p := range v {
+			err = r.WritePacket(p.Metadata().CaptureInfo, p.Data())
+		}
+		r.Flush()
+		f.Close()
 	}
 }

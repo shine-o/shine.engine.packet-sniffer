@@ -1,11 +1,59 @@
 package main
 
 import (
-	"encoding/hex"
+	"bufio"
+	"bytes"
 	"fmt"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcapgo"
+	"github.com/google/gopacket/tcpassembly"
+	"github.com/google/gopacket/tcpassembly/tcpreader"
+	"log"
+	"os"
+	"sync"
+	"time"
 )
+
 var xorKey [499]byte
-func init()  {
+
+/* 8990
+union Name256Byte
+{
+char n256_name[256];
+unsigned __int64 n256_code[32];
+};
+*/
+type Name256Byte struct {
+	n256_name [256]string
+	n256_code uint64
+}
+
+/* 3801
+union Name4
+{
+char n4_name[16];
+unsigned int n4_code[4];
+};
+*/
+type Name4 struct {
+	n4_name [16]string
+	n4_code uint
+}
+
+/*
+	struct PROTO_NC_USER_LOGIN_REQ
+	{
+	Name256Byte user;
+	Name4 password;
+	};
+*/
+type ProtoNcUserLoginReq struct {
+	user     Name256Byte
+	password Name4
+}
+
+func init() {
 	xorKey = [499]byte{
 		0x07, 0x59, 0x69, 0x4A, 0x94, 0x11, 0x94, 0x85, 0x8C, 0x88, 0x05, 0xCB, 0xA0, 0x9E, 0xCD, 0x58,
 		0x3A, 0x36, 0x5B, 0x1A, 0x6A, 0x16, 0xFE, 0xBD, 0xDF, 0x94, 0x02, 0xF8, 0x21, 0x96, 0xC8, 0xE9,
@@ -42,15 +90,73 @@ func init()  {
 	}
 }
 
+type fiestaStreamFactory struct {
+	wg *sync.WaitGroup
+}
+
+type fiestaStream struct {
+	net, transport gopacket.Flow
+	r              tcpreader.ReaderStream
+}
+
+func (fsf *fiestaStreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
+	hstream := &fiestaStream{
+		net:       net,
+		transport: transport,
+		r:         tcpreader.NewReaderStream(),
+	}
+	go hstream.run() // Important... we must guarantee that data from the reader stream is read.
+	// ReaderStream implements tcpassembly.Stream, so we can return a pointer to it.
+	return &hstream.r
+}
+
+func (h *fiestaStream) run() {
+	buf := bufio.NewReader(&h.r)
+	var b bytes.Buffer
+	buf.WriteTo(&b)
+	fmt.Printf("Size of TCP packet: %d \n", len(b.Bytes()))
+	//for {
+	//
+	//}
+}
+
 func main() {
-	b, err := hex.DecodeString("0492268a328b0492268a328b08004500006bf62b400080067f60c0a801b8c0a801f812042332f095520bbaf8c3d250187ffb5d7300004242c0c80e109365f9ef31685d7ba223a385fd4c05abde6032a7c55aa7036a065646a9880bf821c634f09ef6bfbdcf954e63001fbc3bfc11f90c2e12fba774fa89bb40")
-	db := xorCipher(b, len(b))
+	//absPath, err := filepath.Abs(".\\..\\Login-Client.pcapng")
+	//f, err := os.Open(absPath)
+	f, err := os.Open("Client-Login.pcapng")
+	//f, err := os.Open("Client-WorldManager.pcapng")
+	//f, err := os.Open("WorldManager-Client.pcapng")
+
 	if err != nil {
 		fmt.Println(err)
 	}
 
-	fmt.Println(db)
+	defer f.Close()
 
+	r, err := pcapgo.NewNgReader(f, pcapgo.DefaultNgReaderOptions)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	// Set up assembly
+	sf := &fiestaStreamFactory{}
+	sp := tcpassembly.NewStreamPool(sf)
+	a := tcpassembly.NewAssembler(sp)
+
+	for p := range gopacket.NewPacketSource(r, layers.LayerTypeEthernet).Packets() {
+		if p == nil {
+			return
+		}
+
+		if p.NetworkLayer() == nil || p.TransportLayer() == nil || p.TransportLayer().LayerType() != layers.LayerTypeTCP {
+			log.Println("Unusable packet")
+			continue
+		}
+
+		tcp := p.TransportLayer().(*layers.TCP)
+		a.AssembleWithTimestamp(p.NetworkLayer().NetworkFlow(), tcp, p.Metadata().Timestamp)
+	}
+	time.Sleep(10 * time.Second)
 }
 
 func xorCipher(b []byte, len int) []byte {
