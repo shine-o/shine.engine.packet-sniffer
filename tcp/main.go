@@ -9,9 +9,9 @@ import (
 	"github.com/google/gopacket/pcapgo"
 	"github.com/google/gopacket/tcpassembly"
 	"github.com/google/gopacket/tcpassembly/tcpreader"
+	"io"
 	"log"
 	"os"
-	"sync"
 	"time"
 )
 
@@ -90,9 +90,7 @@ func init() {
 	}
 }
 
-type fiestaStreamFactory struct {
-	wg *sync.WaitGroup
-}
+type fiestaStreamFactory struct{}
 
 type fiestaStream struct {
 	net, transport gopacket.Flow
@@ -100,32 +98,39 @@ type fiestaStream struct {
 }
 
 func (fsf *fiestaStreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
-	hstream := &fiestaStream{
+	s := &fiestaStream{
 		net:       net,
 		transport: transport,
 		r:         tcpreader.NewReaderStream(),
 	}
-	go hstream.run() // Important... we must guarantee that data from the reader stream is read.
+	go s.run() // Important... we must guarantee that data from the reader stream is read.
 	// ReaderStream implements tcpassembly.Stream, so we can return a pointer to it.
-	return &hstream.r
+	return &s.r
 }
 
 func (h *fiestaStream) run() {
 	buf := bufio.NewReader(&h.r)
-	var b bytes.Buffer
-	buf.WriteTo(&b)
-	fmt.Printf("Size of TCP packet: %d \n", len(b.Bytes()))
-	//for {
-	//
-	//}
+	for {
+		var b bytes.Buffer
+
+		_, err := buf.WriteTo(&b)
+
+		if err == io.EOF {
+			fmt.Println(err)
+			return
+		}
+	}
 }
 
 func main() {
 	//absPath, err := filepath.Abs(".\\..\\Login-Client.pcapng")
 	//f, err := os.Open(absPath)
-	f, err := os.Open("Client-Login.pcapng")
-	//f, err := os.Open("Client-WorldManager.pcapng")
-	//f, err := os.Open("WorldManager-Client.pcapng")
+	//f, err := os.Open("..\\Client-Login.pcapng")
+	f, err := os.Open("..\\Login-Client.pcapng")
+	//f, err := os.Open("..\\Client-WorldManager.pcapng")
+	//f, err := os.Open("..\\WorldManager-Client.pcapng")
+	//f, err := os.Open("..\\Client-Zone0.pcapng")
+	//f, err := os.Open("..\\Zone0-Client.pcapng")
 
 	if err != nil {
 		fmt.Println(err)
@@ -143,20 +148,29 @@ func main() {
 	sp := tcpassembly.NewStreamPool(sf)
 	a := tcpassembly.NewAssembler(sp)
 
-	for p := range gopacket.NewPacketSource(r, layers.LayerTypeEthernet).Packets() {
-		if p == nil {
-			return
-		}
+	packetSource := gopacket.NewPacketSource(r, layers.LayerTypeEthernet)
+	packets := packetSource.Packets()
+	ticker := time.Tick(time.Minute)
+	for {
+		select {
+		case packet := <-packets:
+			// A nil packet indicates the end of a pcap file.
+			if packet == nil {
+				return
+			}
 
-		if p.NetworkLayer() == nil || p.TransportLayer() == nil || p.TransportLayer().LayerType() != layers.LayerTypeTCP {
-			log.Println("Unusable packet")
-			continue
-		}
+			if packet.NetworkLayer() == nil || packet.TransportLayer() == nil || packet.TransportLayer().LayerType() != layers.LayerTypeTCP {
+				log.Println("Unusable packet")
+				continue
+			}
+			tcp := packet.TransportLayer().(*layers.TCP)
+			a.AssembleWithTimestamp(packet.NetworkLayer().NetworkFlow(), tcp, packet.Metadata().Timestamp)
 
-		tcp := p.TransportLayer().(*layers.TCP)
-		a.AssembleWithTimestamp(p.NetworkLayer().NetworkFlow(), tcp, p.Metadata().Timestamp)
+		case <-ticker:
+			// Every minute, flush connections that haven't seen activity in the past 2 minutes.
+			a.FlushOlderThan(time.Now().Add(time.Minute * -2))
+		}
 	}
-	time.Sleep(10 * time.Second)
 }
 
 func xorCipher(b []byte, len int) []byte {
