@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"flag"
 	"fmt"
 	"github.com/google/gopacket"
@@ -37,7 +36,8 @@ var iface = flag.String("i", "\\Device\\NPF_{3904F81A-F9DE-4578-B4C6-8626CE9B78C
 var snaplen = flag.Int("s", 65536, "SnapLen for pcap packet capture")
 
 //var filter = flag.String("f", "dst portrange 9000-9600 or src portrange 9000-9600", "BPF filter for pcap")
-var filter = flag.String("f", "(dst net 192.168.1.248 or src net 192.168.1.248) and (dst portrange 9000-9600 or src portrange 9000-9600)", "BPF filter for pcap")
+//var filter = flag.String("f", "(dst net 192.168.1.248 or src net 192.168.1.248) and (dst portrange 9000-9600 or src portrange 9000-9600)", "BPF filter for pcap")
+var filter = flag.String("f", "src net 192.168.1.248 and src portrange 9000-9600", "BPF filter for pcap")
 
 var knownServices = make(map[int]*service) // port => serviceName
 
@@ -106,109 +106,71 @@ func (fsf *fiestaStreamFactory) New(net, transport gopacket.Flow) tcpassembly.St
 }
 
 func (fs *fiestaStream) decode(data <-chan []byte) {
-	//var data []byte
-	var splen uint8
-	var bplen uint16
-	var missingData bool
 	var d []byte
+	var offset int
+	var from int
+	offset = 0
 
+nextSegment:
 	for datum := range data {
-		//d = append(d, datum...)
-		if len(datum) == 0 {
-			//log.Println("0 bytes packet")
-			continue
-		}
-
-		log.Printf("Count of %v bytes going through flow %v \n", len(d), fs.fkey)
-
-		// if missingData
-		//		append data
-		//		if done
-		//			if done; protocol goroutine
-		//			continue
-		//		missingData = false
-
-		// if small packet or big packet
-
-		// if packet length equals available datum
-
 		d = append(d, datum...)
-
-		if missingData {
-			d = append(d, datum...)
-			if bplen != 0 {
-				if bplen == (uint16(len(d)) - 3) {
-					missingData = false
-					d = []byte{}
-					log.Printf("Completed big package reconstruction with indicated length %v and datum lenght %v in flow %v", bplen, len(d)-3, fs.fkey)
-
-					//
-				}
-			} else {
-				if splen == (uint8(len(d)) - 1) {
-					missingData = false
-					d = []byte{}
-					log.Printf("Completed big package reconstruction with indicated length %v and datum lenght %v in flow %v", splen, len(d)-1, fs.fkey)
-
-					//
-				}
-			}
-			continue
+		if offset > len(d) {
+			continue nextSegment
 		}
-
-		br := bytes.NewReader(d)
-		err := binary.Read(br, binary.LittleEndian, &splen)
-
-		if err != nil {
-			log.Printf(err.Error())
-		}
-
-		if splen > 0 {
-			// read until splen matches packet length
-			// packet type big
-			if splen < (uint8(len(d) - 1)) {
-				log.Printf("\n%v\n", hex.EncodeToString(datum))
+		log.Printf("Count of %v bytes going through flow %v \n", len(datum), fs.fkey)
+		for offset != len(d) {
+			var fiestaSlice []byte
+			offset, from = nextFiestaPacket(offset, d)
+			if offset > len(d) {
+				continue nextSegment
 			}
-
-			if splen == (uint8(len(d)) - 1) {
-				log.Printf("Done processing small package with length %v", splen)
-				d = []byte{}
-				missingData = false
-			} else {
-				missingData = true
-				log.Printf("Segmented small package with length %v in flow %v", splen, fs.fkey)
-				continue
-			}
-		} else {
-			br.Reset(d)
-			_, err = br.ReadAt(d, 1)
-
-			if err != nil {
-				log.Printf(err.Error())
-			}
-			err := binary.Read(br, binary.LittleEndian, &bplen)
-			if err != nil {
-				log.Printf(err.Error())
-			}
-
-			if bplen == (uint16(len(d)) - 3) {
-				log.Printf("Done processing big package with length %v", splen)
-				d = []byte{}
-				missingData = false
-
-				// wait for more packets
-				// new decoded packet go routine
-			} else {
-				missingData = true
-				log.Printf("Segmented big package with length %v in flow %v", splen, fs.fkey)
-				continue
-			}
+			fiestaSlice = append(fiestaSlice, d[from:offset]...)
+			fs.readPacket(fiestaSlice)
 		}
 	}
 }
 
+func nextFiestaPacket(offset int, b []byte) (int, int) {
+	var skipBytes int
+	if b[offset] == 0 {
+		// len big packet
+		skipBytes = 3
+		var pLen uint16
+		var tempB []byte
+		tempB = append(tempB, b[offset:]...)
+		br := bytes.NewReader(tempB)
+		br.ReadAt(tempB, 1)
+
+		binary.Read(br, binary.LittleEndian, &pLen)
+		from := offset + skipBytes
+		offset += skipBytes + int(pLen)
+		return offset, from
+	} else {
+		// len small packet
+		skipBytes = 1
+		var pLen uint8
+		pLen = b[offset]
+
+		from := offset + skipBytes
+		offset += skipBytes + int(pLen)
+		return offset, from
+	}
+}
+
+func (fs *fiestaStream) readPacket(data []byte) {
+	var opCode uint16
+	br := bytes.NewReader(data)
+	binary.Read(br, binary.LittleEndian, &opCode)
+	department := fmt.Sprintf("%d", opCode>>10)
+	command := fmt.Sprintf("%x", opCode&1023)
+	fmt.Printf("Department: %s, \n Command: %s \n", department, command)
+}
+
 func (fs *fiestaStream) Reassembled(reassemblies []tcpassembly.Reassembly) {
 	for _, reassembly := range reassemblies {
+		if len(reassembly.Bytes) == 0 {
+			continue
+		}
 		fs.data <- reassembly.Bytes
 	}
 }
@@ -250,27 +212,20 @@ func main() {
 		signal.Stop(c)
 		cancel()
 	}()
-	go func() {
-		select {
-		case <-c:
-			pf.persist()
-			cancel()
-		case <-ctx.Done():
-			pf.persist()
-		}
-	}()
 
-	listen(ctx, pf)
+	go listen(ctx, pf)
+
+	select {
+	case <-c:
+		pf.persist()
+		cancel()
+	case <-ctx.Done():
+		pf.persist()
+	}
+
 }
 
 func listen(ctx context.Context, pf *PacketFlow) {
-	//streamFactory := &statsStreamFactory{}
-	//streamPool := tcpassembly.NewStreamPool(streamFactory)
-	//assembler := tcpassembly.NewAssembler(streamPool)
-	//
-	//var tcp layers.TCP
-	//var netFlow gopacket.Flow
-
 	sf := &fiestaStreamFactory{}
 	sp := tcpassembly.NewStreamPool(sf)
 	a := tcpassembly.NewAssembler(sp)

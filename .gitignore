@@ -4,3 +4,6 @@ vendor
 **/*.pcapng
 
 !tcp/*.pcapng
+
+protocol
+Protocol.h
