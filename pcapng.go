@@ -11,13 +11,13 @@ import (
 	"sync"
 )
 
-type PacketFlow struct {
+type Flows struct {
 	pfm map[string][]gopacket.Packet
 	m   sync.Mutex
 }
 
 // asses the package flow, either Client-Service or Service-Client
-func (pf *PacketFlow) add(p gopacket.Packet) {
+func (pf *Flows) add(p gopacket.Packet) {
 
 	src, _ := strconv.Atoi(p.TransportLayer().TransportFlow().Src().String())
 	dst, _ := strconv.Atoi(p.TransportLayer().TransportFlow().Dst().String())
@@ -37,7 +37,7 @@ func (pf *PacketFlow) add(p gopacket.Packet) {
 }
 
 // write to disk pcapng files for each flow in the map
-func (pf *PacketFlow) persist() {
+func (pf *Flows) persist() {
 	for k, v := range pf.pfm {
 		pathName, err := filepath.Abs(fmt.Sprintf("%v%v", "output/", k))
 
@@ -63,7 +63,7 @@ func (pf *PacketFlow) persist() {
 }
 
 // persist the available xorKeys
-func persistXorKeys()  {
+func persistXorKeys() {
 	xorKeysFile, err := filepath.Abs(fmt.Sprintf("%v%v", "output/", "xorKeys.txt"))
 
 	xkf, err := os.OpenFile(xorKeysFile, os.O_WRONLY|os.O_CREATE, 0666)

@@ -37,7 +37,6 @@ func init() {
 	err = os.Mkdir(dir, 0700)
 	logError(err)
 
-
 	iface = viper.GetString("network.interface")
 	snaplen = viper.GetInt("network.snaplen")
 
@@ -67,7 +66,7 @@ func init() {
 		for _, v := range services {
 			port, err := strconv.Atoi(v["port"])
 			logError(err)
-			knownServices[port] = &service{name:v["name"]}
+			knownServices[port] = &service{name: v["name"]}
 		}
 	} else {
 		knownServices[9000] = &service{name: "Account"}
@@ -84,10 +83,10 @@ func init() {
 	}
 }
 
-func viperConfig()  {
+func viperConfig() {
 	viper.SetConfigName("config") // name of config file (without extension)
-	viper.SetConfigType("yaml") // REQUIRED if the config file does not have the extension in the name
-	viper.AddConfigPath(".")               // optionally look for config in the working directory
+	viper.SetConfigType("yaml")   // REQUIRED if the config file does not have the extension in the name
+	viper.AddConfigPath(".")      // optionally look for config in the working directory
 
 	err := viper.ReadInConfig() // Find and read the config file
 	panicError(err)
@@ -103,29 +102,40 @@ func viperConfig()  {
 		}
 	}
 
+	//if !viper.IsSet("network.portRange.start") {
+	//}
+	//
+	//if !viper.IsSet("network.portRange.end") {
+	//}
+
 	viper.SetDefault("network.portRange.start", 9000)
+
 	viper.SetDefault("network.portRange.end", 9600)
+
 	viper.SetDefault("network.interface", 65536)
 
 	viper.SetDefault("protocol.xorTableHexString", "0759694a941194858c8805cba09ecd583a365b1a6a16febddf9402f82196c8e99ef7bfbdcfcdb27a009f4022fc11f90c2e12fba7740a7d78401e2ca02d06cba8b97eefde49ea4e13161680f43dc29ad486d7942417f4d665bd3fdbe4e10f50f6ec7a9a0c273d2466d322689c9a520be0f9a50b25da80490dfd3e77d156a8b7f40f9be80f5247f56f832022db0f0bb14385c1cba40b0219dff08becdb6c6d66ad45be89147e2f8910b89360d860def6fe6e9bca06c1759533cfc0b2e0cca5ce12f6e5b5b426c5b2184f2a5d261b654df545c98414dc7c124b189cc724e73c64ffd63a2cee8c8149396cb7dcbd94e232f7dd0afc020164ec4c940ab156f5c9a934de0f3827bc81300f7b3825fee83e29ba5543bf6b9f1f8a4952187f8af888245c4fe1a830878e501f2fd10cb4fd0abcdc1285e252ee4a5838abffc63db960640ab450d54089179ad585cfec0d7e817fe3c3040122ec27ccfa3e21a654c8de00b6df279ff625340785bfa7a5a5e0830c3d5d2040af60a36456f305c41c7d3798c3e85a6e5885a49a6b6af4a37b619b09401e604b32d951a4fef95d4e4afb4ad47c330233d59dce5baa5a7cd8f805fa1f2b8c725750ae6c1989ca01fcfc299b61126863654626c45b50aa2bbeef9a790223752c2013fdd95a7623f10bb5b859f99f7ae606e9a53ab450bf165898b39a6e36ee8deb")
+
 	viper.SetDefault("protocol.xorLimit", 350)
+
 	viper.SetDefault("protocol.log.client", true)
+
 	viper.SetDefault("protocol.log.server", true)
 }
 
-func logError(e error)  {
+func logError(e error) {
 	if e != nil {
 		log.Println(e)
 	}
 }
 
-func panicError(e error)  {
+func panicError(e error) {
 
 }
 
 // for each service, start a goroutine with listener
 func main() {
-	pf := &PacketFlow{
+	pf := &Flows{
 		pfm: make(map[string][]gopacket.Packet),
 	}
 
@@ -153,7 +163,7 @@ func main() {
 
 }
 
-func listen(ctx context.Context, pf *PacketFlow) {
+func listen(ctx context.Context, pf *Flows) {
 
 	sf := &fiestaStreamFactory{}
 
