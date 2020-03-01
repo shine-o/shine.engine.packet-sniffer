@@ -144,60 +144,6 @@ func (fsf *fiestaStreamFactory) New(net, transport gopacket.Flow) tcpassembly.St
 
 //func (fs *fiestaStream) decode(segments <-chan fiestaSegment, xorKey <-chan uint16) {
 func (fs *fiestaStream) decode(segments <-chan fiestaSegment) {
-	//func (fs *fiestaStream) decode() {
-	//	var d []byte
-	//	var offset int
-	//	//var hasXorKey bool
-	//	offset = 0
-	//	//hasXorKey = false
-	//	for {
-	//		select {
-	//		//case x := <- xorKey:
-	//		//	hasXorKey = true
-	//		case segment:= <- segments:
-	//			d = append(d, segment.data...)
-	//
-	//			if offset > len(d) {
-	//				break
-	//			}
-	//
-	//			if fs.target == "server" {
-	//				dst, _ := strconv.Atoi(fs.transport.Dst().String())
-	//				if knownServices[dst].xorKey == nil {
-	//					fmt.Printf("\nMissing xorKey for service %v, waiting...", knownServices[dst].name)
-	//					break
-	//				}
-	//			}
-	//			for offset != len(d) {
-	//				var skipBytes int
-	//				var pLen int
-	//				var pType string
-	//				var rs []byte
-	//
-	//				pLen, pType = rawSlice(offset, d)
-	//
-	//				if pType == "small" {
-	//					skipBytes = 1
-	//				} else {
-	//					skipBytes = 3
-	//				}
-	//
-	//				nextOffset := offset+skipBytes+pLen
-	//				if nextOffset > len(d) {
-	//					break
-	//				}
-	//
-	//				rs = append(rs, d[offset+skipBytes:nextOffset]...)
-	//
-	//				go fs.readPacket(segment.seen, pLen, pType, rs)
-	//
-	//				offset += skipBytes + pLen
-	//			}
-	//		default:
-	//			return
-	//		}
-	//	}
-
 	var d []byte
 	var offset int
 	offset = 0
@@ -269,7 +215,7 @@ func (fs *fiestaStream) readPacket(seen time.Time, pLen int, pType string, data 
 		if knownServices[dst].xorKey == nil {
 			panic("missing xorKey")
 		}
-		xorCipher(data, *knownServices[dst].xorKey)
+		xorCipher(data, knownServices[dst].xorKey)
 	}
 	var opCode, department, command uint16
 	br := bytes.NewReader(data)
@@ -326,12 +272,13 @@ func (fs *fiestaStream) ReassemblyComplete() {
 }
 
 // decrypt encrypted bytes
-func xorCipher(eb []byte, xorPos uint16) {
+func xorCipher(eb []byte, xorPos *uint16) {
 	for i, _ := range eb {
-		eb[i] ^= xorKey[xorPos]
-		xorPos++
-		if xorPos == 499 {
-			xorPos = 0
+		eb[i] ^= xorKey[*xorPos]
+		*xorPos++
+		//if xorPos == 499 {
+		if *xorPos == 350 {
+			*xorPos = 0
 		}
 	}
 }
