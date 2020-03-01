@@ -3,7 +3,7 @@
 # Server side sniffer
 
 > Tool that captures all packets between the client and services and show them in real time.
->The program also saves the streams between the flows to a pcapng file.
+> The program also saves the streams between the flows to a pcapng file.
  
 
 #### Default ports for 2016 services. 
@@ -22,8 +22,9 @@
 | GameLog     | 9511 |        |      |           |
 
     
+#### Configuration
 
-
+Adjust the **config.yml** file to your needs
 
 
 
