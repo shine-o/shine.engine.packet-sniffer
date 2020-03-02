@@ -1,10 +1,11 @@
-
-
-# Server side sniffer
+# Shine Online Packet Sniffer
 
 > Tool that captures all packets between the client and services and show them in real time.
 > The program also saves the streams between the flows to a pcapng file.
  
+#### Configuration
+
+Adjust the **config.yml** file to your needs
 
 #### Default ports for 2016 services. 
 
@@ -21,10 +22,6 @@
 | Character   | 9411 |        |      |           |
 | GameLog     | 9511 |        |      |           |
 
-    
-#### Configuration
+#### Packet info
 
-Adjust the **config.yml** file to your needs
-
-
-
+![](packet-flow-draw.png)

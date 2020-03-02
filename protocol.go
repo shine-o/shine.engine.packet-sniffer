@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"github.com/spf13/viper"
 	"log"
-	"strconv"
 	"time"
 )
 
@@ -42,13 +41,14 @@ type service struct {
 	xorKey *uint16
 }
 
-type fiestaSegment struct {
+type shineSegment struct {
 	data []byte
 	seen time.Time
 }
 
 var xorKey []byte
 
+// big or small packet
 func (pcb *ProtocolCommandBase) Type() string {
 	return pcb.packetType
 }
@@ -57,14 +57,17 @@ func (pcb *ProtocolCommandBase) Length() int {
 	return pcb.length
 }
 
+// network command category inside the Client [ more info with the leaked pdb ]
 func (pcb *ProtocolCommandBase) Department() uint16 {
 	return pcb.department
 }
 
+// network command category action inside the Client [ more info with the leaked pdb ]
 func (pcb *ProtocolCommandBase) Command() uint16 {
 	return pcb.command
 }
 
+// a.k.a packet header
 func (pcb *ProtocolCommandBase) OperationCode() uint16 {
 	return pcb.department<<10 | pcb.command&1023
 }
@@ -87,6 +90,7 @@ func (pcb *ProtocolCommandBase) RawData() []byte {
 	return r
 }
 
+// readable packet format
 func (pcb *ProtocolCommandBase) String() string {
 	type exportedPcb struct {
 		PacketType    string `json:"packetType"`
@@ -111,108 +115,8 @@ func (pcb *ProtocolCommandBase) String() string {
 	return string(rawJson)
 }
 
-func (fs *fiestaStream) decode(segments <-chan fiestaSegment) {
-	//func (fs *fiestaStream) decode() {
-	//	var d []byte
-	//	var offset int
-	//	//var hasXorKey bool
-	//	offset = 0
-	//	//hasXorKey = false
-	//	for {
-	//		select {
-	//		//case x := <- xorKey:
-	//		//	hasXorKey = true
-	//		case segment:= <- segments:
-	//			d = append(d, segment.data...)
-	//
-	//			if offset > len(d) {
-	//				break
-	//			}
-	//
-	//			if fs.target == "server" {
-	//				dst, _ := strconv.Atoi(fs.transport.Dst().String())
-	//				if knownServices[dst].xorKey == nil {
-	//					fmt.Printf("\nMissing xorKey for service %v, waiting...", knownServices[dst].name)
-	//					break
-	//				}
-	//			}
-	//			for offset != len(d) {
-	//				var skipBytes int
-	//				var pLen int
-	//				var pType string
-	//				var rs []byte
-	//
-	//				pLen, pType = rawSlice(offset, d)
-	//
-	//				if pType == "small" {
-	//					skipBytes = 1
-	//				} else {
-	//					skipBytes = 3
-	//				}
-	//
-	//				nextOffset := offset+skipBytes+pLen
-	//				if nextOffset > len(d) {
-	//					break
-	//				}
-	//
-	//				rs = append(rs, d[offset+skipBytes:nextOffset]...)
-	//
-	//				go fs.readPacket(segment.seen, pLen, pType, rs)
-	//
-	//				offset += skipBytes + pLen
-	//			}
-	//		default:
-	//			return
-	//		}
-	//	}
-
-	var d []byte
-	var offset int
-	offset = 0
-
-nextSegment:
-	for segment := range segments {
-		d = append(d, segment.data...)
-
-		if offset > len(d) {
-			continue nextSegment
-		}
-
-		if fs.target == "server" {
-			dst, _ := strconv.Atoi(fs.transport.Dst().String())
-			if knownServices[dst].xorKey == nil { //too many goroutines will be accessing this global, a select statement where I wait would be adecuate.
-				fmt.Printf("\nMissing xorKey for service %v, waiting...", knownServices[dst].name)
-				continue
-			}
-		}
-		for offset != len(d) {
-			var skipBytes int
-			var pLen int
-			var pType string
-			var rs []byte
-
-			pLen, pType = rawSlice(offset, d)
-
-			if pType == "small" {
-				skipBytes = 1
-			} else {
-				skipBytes = 3
-			}
-
-			nextOffset := offset + skipBytes + pLen
-			if nextOffset > len(d) {
-				continue nextSegment
-			}
-
-			rs = append(rs, d[offset+skipBytes:nextOffset]...)
-
-			go fs.readPacket(segment.seen, pLen, pType, rs)
-
-			offset += skipBytes + pLen
-		}
-	}
-}
-
+// find out if big or small packet
+// return length and type
 func rawSlice(offset int, b []byte) (int, string) {
 	if b[offset] == 0 {
 		// len big packet
@@ -230,62 +134,12 @@ func rawSlice(offset int, b []byte) (int, string) {
 	}
 }
 
-func (fs *fiestaStream) readPacket(seen time.Time, pLen int, pType string, data []byte) {
-	if fs.target == "server" {
-		dst, _ := strconv.Atoi(fs.transport.Dst().String())
-		if knownServices[dst].xorKey == nil {
-			panic("missing xorKey")
-		}
-		xorCipher(data, knownServices[dst].xorKey)
-	}
-	var opCode, department, command uint16
-	br := bytes.NewReader(data)
-	binary.Read(br, binary.LittleEndian, &opCode)
-	if opCode == 2055 {
-		var xorKey uint16
-		src, _ := strconv.Atoi(fs.transport.Src().String())
-		binary.Read(br, binary.LittleEndian, &xorKey)
-		knownServices[src].xorKey = &xorKey
-		log.Printf("[%v]Found xor key %v for service %v\n", seen, xorKey, knownServices[src].name)
-		log.Printf("[%v]Found xor key %v for service %v\n", seen, xorKey, knownServices[src].name)
-		log.Printf("[%v]Found xor key %v for service %v\n", seen, xorKey, knownServices[src].name)
-	}
-
-	department = opCode >> 10
-	command = opCode & 1023
-	pc := PC{
-		pcb: ProtocolCommandBase{
-			packetType:    pType,
-			length:        pLen,
-			department:    department,
-			command:       command,
-			operationCode: opCode,
-			data:          data,
-		},
-	}
-
-	src, _ := strconv.Atoi(fs.transport.Src().String())
-	dst, _ := strconv.Atoi(fs.transport.Dst().String())
-	pLog := fmt.Sprintf("\n[%v] [%v] [%v - %v] %v", seen, fs.fkey, src, dst, pc.pcb.String())
-	if fs.target == "server" {
-		if viper.GetBool("protocol.log.client") {
-			fmt.Print(pLog)
-		}
-	} else {
-		if viper.GetBool("protocol.log.server") {
-			fmt.Print(pLog)
-		}
-	}
-}
-
-// decrypt encrypted bytes
+// decrypt encrypted bytes using captured xorKey and xorTable
 func xorCipher(eb []byte, xorPos *uint16) {
 	xorLimit := uint16(viper.GetInt("protocol.xorLimit"))
-	//fmt.Println(xorLimit)
 	for i, _ := range eb {
 		eb[i] ^= xorKey[*xorPos]
 		*xorPos++
-		//if *xorPos >= 350 {
 		if *xorPos >= xorLimit {
 			*xorPos = 0
 		}

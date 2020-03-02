@@ -39,4 +39,4 @@ protocol:
   xorLimit: 350
   log:
     client: true
-    server: false
+    server: true

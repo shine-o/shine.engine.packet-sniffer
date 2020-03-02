@@ -23,7 +23,6 @@ var knownServices = make(map[int]*service) // port => serviceName
 
 func init() {
 	viperConfig()
-
 	// remove output folder if exists, create it again
 	dir, err := filepath.Abs("output/")
 	fmt.Println(dir)
@@ -102,12 +101,6 @@ func viperConfig() {
 		}
 	}
 
-	//if !viper.IsSet("network.portRange.start") {
-	//}
-	//
-	//if !viper.IsSet("network.portRange.end") {
-	//}
-
 	viper.SetDefault("network.portRange.start", 9000)
 
 	viper.SetDefault("network.portRange.end", 9600)
@@ -130,10 +123,11 @@ func logError(e error) {
 }
 
 func panicError(e error) {
-
+	if e != nil {
+		panic(e)
+	}
 }
 
-// for each service, start a goroutine with listener
 func main() {
 	pf := &Flows{
 		pfm: make(map[string][]gopacket.Packet),
@@ -155,7 +149,7 @@ func main() {
 	select {
 	case <-c:
 		pf.persist()
-		persistXorKeys()
+		//persistXorKeys()
 		cancel()
 	case <-ctx.Done():
 		pf.persist()
@@ -164,9 +158,11 @@ func main() {
 }
 
 func listen(ctx context.Context, pf *Flows) {
-
-	sf := &fiestaStreamFactory{}
-
+	cs = &activeStreams{
+		fromClient: make(map[int]*shineStream),
+		fromServer: make(map[int]*shineStream),
+	}
+	sf := &shineStreamFactory{}
 	sp := tcpassembly.NewStreamPool(sf)
 	a := tcpassembly.NewAssembler(sp)
 
