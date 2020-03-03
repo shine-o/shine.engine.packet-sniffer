@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/tcpassembly"
-	"github.com/google/gopacket/tcpassembly/tcpreader"
 	"github.com/spf13/viper"
 	"log"
 	"strconv"
@@ -23,59 +22,65 @@ type activeStreams struct {
 type shineStreamFactory struct{}
 
 type shineStream struct {
-	net, transport     gopacket.Flow
-	r                  tcpreader.ReaderStream
-	fkey               string
-	target             string
+	src, dst           int //  tcp ports
 	segment            chan<- shineSegment
-	xorKey             chan<- uint16
+	xorKey             chan<- uint16 // used to decrypt packets flowing from the client, it increments by one for each decrypted byte
 	reassemblyComplete chan<- bool
 }
 
+type shineSegment struct {
+	data []byte
+	seen time.Time
+}
+
+type packetMetadata struct {
+	src, dst   int
+	seen       time.Time
+	length     int
+	packetType string
+	data       []byte
+}
+
+type Shine struct {
+	knownServices map[int]*service // port => serviceName
+	mu            sync.Mutex
+}
+
+type service struct {
+	name string
+}
+
+var xorKey []byte
 var cs *activeStreams
 
 func (fsf *shineStreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
-
 	src, _ := strconv.Atoi(transport.Src().String())
 	dst, _ := strconv.Atoi(transport.Dst().String())
-
-	var fkey string
-	var target string
-
-	if src >= 9000 && src <= 9600 {
-		// server - client
-		fkey = fmt.Sprintf("%v-Client", knownServices[src].name)
-		target = "client"
-	} else {
-		// client - server
-		fkey = fmt.Sprintf("Client-%v", knownServices[dst].name)
-		target = "server"
-	}
-
-	log.Printf("new stream %v:%v started", net, transport)
 	segments := make(chan shineSegment, 512)
 	reassemblyComplete := make(chan bool)
 	xorKey := make(chan uint16)
+
 	s := &shineStream{
-		net:                net,
-		transport:          transport,
-		fkey:               fkey,
-		target:             target,
+		src:                src,
+		dst:                dst,
 		segment:            segments,
 		xorKey:             xorKey,
 		reassemblyComplete: reassemblyComplete,
 	}
-	cs.mu.Lock()
 
-	if target == "client" {
+	cs.mu.Lock()
+	if src >= 9000 && src <= 9600 {
+		// server - client
 		cs.fromServer[src] = s
 		go s.decodeServerPackets(segments, reassemblyComplete)
 	} else {
+		// client - server
 		cs.fromClient[src] = s
 		go s.decodeClientPackets(segments, reassemblyComplete, xorKey)
 	}
-
 	cs.mu.Unlock()
+
+	log.Printf("new stream %v:%v started", net, transport)
 
 	return s
 }
@@ -91,14 +96,12 @@ func (fs *shineStream) Reassembled(reassemblies []tcpassembly.Reassembly) {
 }
 
 func (fs *shineStream) ReassemblyComplete() {
-	src, _ := strconv.Atoi(fs.transport.Src().String())
-	dst, _ := strconv.Atoi(fs.transport.Dst().String())
-	log.Printf("[Stream completed] [%v - %v]", src, dst)
+	log.Printf("[Stream completed] [%v - %v]", fs.src, fs.dst)
 	cs.mu.Lock()
-	if fs.target == "client" {
-		cs.fromServer[src] = nil
+	if fs.src >= 9000 && fs.src <= 9600 {
+		cs.fromServer[fs.src] = nil
 	} else {
-		cs.fromClient[dst] = nil
+		cs.fromClient[fs.dst] = nil
 	}
 	cs.mu.Unlock()
 	fs.reassemblyComplete <- true
@@ -160,7 +163,15 @@ func (fs *shineStream) decodeClientPackets(segments <-chan shineSegment, reassem
 
 				xorCipher(rs, &xk)
 
-				fs.readPacket(seen, pLen, pType, rs)
+				pm := &packetMetadata{
+					src:        fs.src,
+					dst:        fs.dst,
+					seen:       seen,
+					length:     pLen,
+					packetType: pType,
+					data:       rs,
+				}
+				pm.readPacket()
 
 				offset += skipBytes + pLen
 			}
@@ -171,6 +182,8 @@ func (fs *shineStream) decodeClientPackets(segments <-chan shineSegment, reassem
 // process segment data, create readable packet
 func (fs *shineStream) decodeServerPackets(segments <-chan shineSegment, reassemblyComplete <-chan bool) {
 	var d []byte
+	var seen time.Time
+
 	var offset int
 	offset = 0
 
@@ -181,7 +194,7 @@ func (fs *shineStream) decodeServerPackets(segments <-chan shineSegment, reassem
 			return
 		case segment := <-segments:
 			d = append(d, segment.data...)
-
+			seen = segment.seen
 			if offset > len(d) {
 				break
 			}
@@ -206,7 +219,17 @@ func (fs *shineStream) decodeServerPackets(segments <-chan shineSegment, reassem
 				}
 
 				rs = append(rs, d[offset+skipBytes:nextOffset]...)
-				fs.readPacket(segment.seen, pLen, pType, rs)
+
+				pm := &packetMetadata{
+					src:        fs.src,
+					dst:        fs.dst,
+					seen:       seen,
+					length:     pLen,
+					packetType: pType,
+					data:       rs,
+				}
+
+				pm.readPacket()
 
 				offset += skipBytes + pLen
 			}
@@ -217,50 +240,78 @@ func (fs *shineStream) decodeServerPackets(segments <-chan shineSegment, reassem
 // read packet data
 // if xorKey is detected in a server flow (packets coming from the server), that is if header == 2055, notify the converse flow
 // create PC struct with packet headers + data
-func (fs *shineStream) readPacket(seen time.Time, pLen int, pType string, data []byte) {
+func (pm packetMetadata) readPacket() {
 	var opCode, department, command uint16
-	br := bytes.NewReader(data)
+	br := bytes.NewReader(pm.data)
 	binary.Read(br, binary.LittleEndian, &opCode)
 	if opCode == 2055 {
 		var xorKey uint16
-		src, _ := strconv.Atoi(fs.transport.Src().String())
-		dst, _ := strconv.Atoi(fs.transport.Dst().String())
 		binary.Read(br, binary.LittleEndian, &xorKey)
 
 		cs.mu.Lock()
-		if cs.fromClient[dst] != nil {
-			cs.fromClient[dst].xorKey <- xorKey
+		if cs.fromClient[pm.dst] != nil {
+			cs.fromClient[pm.dst].xorKey <- xorKey
 		}
 		cs.mu.Unlock()
 
-		log.Printf("[%v]Found xor key %v for service %v\n", seen, xorKey, knownServices[src].name)
-		log.Printf("[%v]Found xor key %v for service %v\n", seen, xorKey, knownServices[src].name)
-		log.Printf("[%v]Found xor key %v for service %v\n", seen, xorKey, knownServices[src].name)
+		log.Printf("[%v]Found xor key %v for service %v\n", pm.seen, xorKey, shine.knownServices[pm.src].name)
 	}
 
 	department = opCode >> 10
 	command = opCode & 1023
 	pc := PC{
 		pcb: ProtocolCommandBase{
-			packetType:    pType,
-			length:        pLen,
+			packetType:    pm.packetType,
+			length:        pm.length,
 			department:    department,
 			command:       command,
 			operationCode: opCode,
-			data:          data,
+			data:          pm.data,
 		},
 	}
 
-	src, _ := strconv.Atoi(fs.transport.Src().String())
-	dst, _ := strconv.Atoi(fs.transport.Dst().String())
-	pLog := fmt.Sprintf("\n[%v] [%v] [%v - %v] %v", seen, fs.fkey, src, dst, pc.pcb.String())
-	if fs.target == "server" {
+	var flowKey string
+	if pm.src >= 9000 && pm.src <= 9600 {
+		flowKey = fmt.Sprintf("%v-Client", shine.knownServices[pm.src].name)
+		pLog := fmt.Sprintf("\n[%v] [%v] [%v - %v] %v", pm.seen, flowKey, pm.src, pm.dst, pc.pcb.String())
 		if viper.GetBool("protocol.log.client") {
 			fmt.Print(pLog)
 		}
 	} else {
+		flowKey = fmt.Sprintf("Client-%v", shine.knownServices[pm.dst].name)
+		pLog := fmt.Sprintf("\n[%v] [%v] [%v - %v] %v", pm.seen, flowKey, pm.src, pm.dst, pc.pcb.String())
 		if viper.GetBool("protocol.log.server") {
 			fmt.Print(pLog)
+		}
+	}
+}
+
+// find out if big or small packet
+// return length and type
+func rawSlice(offset int, b []byte) (int, string) {
+	if b[offset] == 0 {
+		var pLen uint16
+		var tempB []byte
+		tempB = append(tempB, b[offset:]...)
+		br := bytes.NewReader(tempB)
+		br.ReadAt(tempB, 1)
+		binary.Read(br, binary.LittleEndian, &pLen)
+		return int(pLen), "big"
+	} else {
+		var pLen uint8
+		pLen = b[offset]
+		return int(pLen), "small"
+	}
+}
+
+// decrypt encrypted bytes using captured xorKey and xorTable
+func xorCipher(eb []byte, xorPos *uint16) {
+	xorLimit := uint16(viper.GetInt("protocol.xorLimit"))
+	for i, _ := range eb {
+		eb[i] ^= xorKey[*xorPos]
+		*xorPos++
+		if *xorPos >= xorLimit {
+			*xorPos = 0
 		}
 	}
 }

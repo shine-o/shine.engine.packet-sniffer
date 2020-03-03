@@ -19,7 +19,7 @@ import (
 var iface string
 var snaplen int
 var filter string
-var knownServices = make(map[int]*service) // port => serviceName
+var shine Shine
 
 func init() {
 	viperConfig()
@@ -47,7 +47,8 @@ func init() {
 	filter = fmt.Sprintf("(dst net %v or src net %v) and (dst portrange %v or src portrange %v)", serverIp, serverIp, portRange, portRange)
 
 	xorKey, err = hex.DecodeString(viper.GetString("protocol.xorTableHexString"))
-
+	shine.mu.Lock()
+	shine.knownServices = make(map[int]*service)
 	if viper.IsSet("protocol.services") {
 		// snippet for loading yaml array
 		services := make([]map[string]string, 0)
@@ -65,21 +66,22 @@ func init() {
 		for _, v := range services {
 			port, err := strconv.Atoi(v["port"])
 			logError(err)
-			knownServices[port] = &service{name: v["name"]}
+			shine.knownServices[port] = &service{name: v["name"]}
 		}
 	} else {
-		knownServices[9000] = &service{name: "Account"}
-		knownServices[9311] = &service{name: "AccountLog"}
-		knownServices[9411] = &service{name: "Character"}
-		knownServices[9511] = &service{name: "GameLog"}
-		knownServices[9010] = &service{name: "Login"}
-		knownServices[9110] = &service{name: "WorldManager"}
-		knownServices[9210] = &service{name: "Zone00"}
-		knownServices[9212] = &service{name: "Zone01"}
-		knownServices[9214] = &service{name: "Zone02"}
-		knownServices[9216] = &service{name: "Zone03"}
-		knownServices[9218] = &service{name: "Zone04"}
+		shine.knownServices[9000] = &service{name: "Account"}
+		shine.knownServices[9311] = &service{name: "AccountLog"}
+		shine.knownServices[9411] = &service{name: "Character"}
+		shine.knownServices[9511] = &service{name: "GameLog"}
+		shine.knownServices[9010] = &service{name: "Login"}
+		shine.knownServices[9110] = &service{name: "WorldManager"}
+		shine.knownServices[9210] = &service{name: "Zone00"}
+		shine.knownServices[9212] = &service{name: "Zone01"}
+		shine.knownServices[9214] = &service{name: "Zone02"}
+		shine.knownServices[9216] = &service{name: "Zone03"}
+		shine.knownServices[9218] = &service{name: "Zone04"}
 	}
+	shine.mu.Unlock()
 }
 
 func viperConfig() {

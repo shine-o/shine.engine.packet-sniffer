@@ -26,9 +26,9 @@ func (pf *Flows) add(p gopacket.Packet) {
 
 	if src >= 9000 && src <= 9600 {
 		// server - client
-		fkey = fmt.Sprintf("%v-Client.pcapng", knownServices[src].name)
+		fkey = fmt.Sprintf("%v-Client.pcapng", shine.knownServices[src].name)
 	} else {
-		fkey = fmt.Sprintf("Client-%v.pcapng", knownServices[dst].name)
+		fkey = fmt.Sprintf("Client-%v.pcapng", shine.knownServices[dst].name)
 	}
 
 	pf.m.Lock()
@@ -75,7 +75,7 @@ func (pf *Flows) persist() {
 //	}
 //	for _, v := range knownServices {
 //		if v.xorKey != nil {
-//			sx := fmt.Sprintf("%v -> %v\n", v.name, *v.xorKey)
+//			sx := fmt.Sprintf("%v -> %v\n", v.name, *	v.xorKey)
 //			_, err := xkf.Write([]byte(sx))
 //			if err != nil {
 //				fmt.Println(err)

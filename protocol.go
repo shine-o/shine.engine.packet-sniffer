@@ -1,14 +1,10 @@
 package main
 
 import (
-	"bytes"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/spf13/viper"
 	"log"
-	"time"
 )
 
 type ProtocolCommand interface {
@@ -35,18 +31,6 @@ type PC struct {
 	pcb ProtocolCommandBase
 	pcc interface{} // protocol command concrete, eg: PROTO_NC_QUEST_GIVEUP_ACK
 }
-
-type service struct {
-	name   string
-	xorKey *uint16
-}
-
-type shineSegment struct {
-	data []byte
-	seen time.Time
-}
-
-var xorKey []byte
 
 // big or small packet
 func (pcb *ProtocolCommandBase) Type() string {
@@ -113,35 +97,4 @@ func (pcb *ProtocolCommandBase) String() string {
 		log.Println(err.Error())
 	}
 	return string(rawJson)
-}
-
-// find out if big or small packet
-// return length and type
-func rawSlice(offset int, b []byte) (int, string) {
-	if b[offset] == 0 {
-		// len big packet
-		var pLen uint16
-		var tempB []byte
-		tempB = append(tempB, b[offset:]...)
-		br := bytes.NewReader(tempB)
-		br.ReadAt(tempB, 1)
-		binary.Read(br, binary.LittleEndian, &pLen)
-		return int(pLen), "big"
-	} else {
-		var pLen uint8
-		pLen = b[offset]
-		return int(pLen), "small"
-	}
-}
-
-// decrypt encrypted bytes using captured xorKey and xorTable
-func xorCipher(eb []byte, xorPos *uint16) {
-	xorLimit := uint16(viper.GetInt("protocol.xorLimit"))
-	for i, _ := range eb {
-		eb[i] ^= xorKey[*xorPos]
-		*xorPos++
-		if *xorPos >= xorLimit {
-			*xorPos = 0
-		}
-	}
 }
