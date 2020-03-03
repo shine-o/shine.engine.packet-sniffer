@@ -146,7 +146,7 @@ func (fs *shineStream) decodeClientPackets(segments <-chan shineSegment, reassem
 				var pType string
 				var rs []byte
 
-				pLen, pType = rawSlice(offset, d)
+				pLen, pType = packetBoundary(offset, d)
 
 				if pType == "small" {
 					skipBytes = 1
@@ -171,8 +171,8 @@ func (fs *shineStream) decodeClientPackets(segments <-chan shineSegment, reassem
 					packetType: pType,
 					data:       rs,
 				}
-				pm.readPacket()
-
+				pc := pm.processPacket()
+				pm.logPacket(pc)
 				offset += skipBytes + pLen
 			}
 		}
@@ -205,7 +205,7 @@ func (fs *shineStream) decodeServerPackets(segments <-chan shineSegment, reassem
 				var pType string
 				var rs []byte
 
-				pLen, pType = rawSlice(offset, d)
+				pLen, pType = packetBoundary(offset, d)
 
 				if pType == "small" {
 					skipBytes = 1
@@ -229,7 +229,9 @@ func (fs *shineStream) decodeServerPackets(segments <-chan shineSegment, reassem
 					data:       rs,
 				}
 
-				pm.readPacket()
+				pc := pm.processPacket()
+
+				pm.logPacket(pc)
 
 				offset += skipBytes + pLen
 			}
@@ -237,10 +239,27 @@ func (fs *shineStream) decodeServerPackets(segments <-chan shineSegment, reassem
 	}
 }
 
+func (pm packetMetadata) logPacket(pc PC) {
+	var flowKey string
+	if pm.src >= 9000 && pm.src <= 9600 {
+		flowKey = fmt.Sprintf("%v-Client", shine.knownServices[pm.src].name)
+		pLog := fmt.Sprintf("\n[%v] [%v] [%v - %v] %v", pm.seen, flowKey, pm.src, pm.dst, pc.pcb.String())
+		if viper.GetBool("protocol.log.client") {
+			fmt.Print(pLog)
+		}
+	} else {
+		flowKey = fmt.Sprintf("Client-%v", shine.knownServices[pm.dst].name)
+		pLog := fmt.Sprintf("\n[%v] [%v] [%v - %v] %v", pm.seen, flowKey, pm.src, pm.dst, pc.pcb.String())
+		if viper.GetBool("protocol.log.server") {
+			fmt.Print(pLog)
+		}
+	}
+}
+
 // read packet data
 // if xorKey is detected in a server flow (packets coming from the server), that is if header == 2055, notify the converse flow
 // create PC struct with packet headers + data
-func (pm packetMetadata) readPacket() {
+func (pm packetMetadata) processPacket() PC {
 	var opCode, department, command uint16
 	br := bytes.NewReader(pm.data)
 	binary.Read(br, binary.LittleEndian, &opCode)
@@ -259,7 +278,7 @@ func (pm packetMetadata) readPacket() {
 
 	department = opCode >> 10
 	command = opCode & 1023
-	pc := PC{
+	return PC{
 		pcb: ProtocolCommandBase{
 			packetType:    pm.packetType,
 			length:        pm.length,
@@ -269,26 +288,11 @@ func (pm packetMetadata) readPacket() {
 			data:          pm.data,
 		},
 	}
-
-	var flowKey string
-	if pm.src >= 9000 && pm.src <= 9600 {
-		flowKey = fmt.Sprintf("%v-Client", shine.knownServices[pm.src].name)
-		pLog := fmt.Sprintf("\n[%v] [%v] [%v - %v] %v", pm.seen, flowKey, pm.src, pm.dst, pc.pcb.String())
-		if viper.GetBool("protocol.log.client") {
-			fmt.Print(pLog)
-		}
-	} else {
-		flowKey = fmt.Sprintf("Client-%v", shine.knownServices[pm.dst].name)
-		pLog := fmt.Sprintf("\n[%v] [%v] [%v - %v] %v", pm.seen, flowKey, pm.src, pm.dst, pc.pcb.String())
-		if viper.GetBool("protocol.log.server") {
-			fmt.Print(pLog)
-		}
-	}
 }
 
 // find out if big or small packet
 // return length and type
-func rawSlice(offset int, b []byte) (int, string) {
+func packetBoundary(offset int, b []byte) (int, string) {
 	if b[offset] == 0 {
 		var pLen uint16
 		var tempB []byte
