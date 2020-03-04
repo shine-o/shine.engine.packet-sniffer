@@ -4,8 +4,31 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/spf13/viper"
+	"gopkg.in/yaml.v2"
+	"io/ioutil"
 	"log"
+	"path/filepath"
+	"strconv"
+	"strings"
 )
+
+type PCList struct {
+	Departments map[uint8]Department
+}
+
+type RawPCList struct {
+	Departments []Department `yaml:"departments,flow"`
+}
+
+type Department struct {
+	HexId             string `yaml:"hexId"`
+	Name              string `yaml:"name"`
+	RawCommands       string `yaml:"commands"`
+	ProcessedCommands map[string]string
+}
+
+var pcl *PCList
 
 type ProtocolCommand interface {
 	Type() int
@@ -83,18 +106,76 @@ func (pcb *ProtocolCommandBase) String() string {
 		Command       string `json:"command"`
 		OperationCode uint16 `json:"opCode"`
 		Data          string `json:"data"`
+		FriendlyName  string `json:"friendlyName"`
 	}
+
 	ePcb := exportedPcb{
 		PacketType:    pcb.packetType,
 		Length:        pcb.length,
 		Department:    pcb.department,
-		Command:       fmt.Sprintf("%x", pcb.command),
+		Command:       fmt.Sprintf("%X", pcb.command),
 		OperationCode: pcb.operationCode,
 		Data:          hex.EncodeToString(pcb.data),
 	}
+
+	if dpt, ok := pcl.Departments[uint8(pcb.department)]; ok {
+		//fmt.Println(dpt.ProcessedCommands)
+		ePcb.FriendlyName = dpt.ProcessedCommands[ePcb.Command]
+	}
+
 	rawJson, err := json.Marshal(&ePcb)
 	if err != nil {
 		log.Println(err.Error())
 	}
 	return string(rawJson)
+}
+
+// struct information about captured network packets
+func initPCList() {
+
+	pcl = &PCList{
+		Departments: make(map[uint8]Department),
+	}
+
+	pathName, err := filepath.Abs(viper.GetString("protocol.nc-data"))
+	panicError(err)
+
+	d, err := ioutil.ReadFile(pathName)
+	logError(err)
+
+	rPcl := &RawPCList{}
+
+	err = yaml.Unmarshal(d, rPcl)
+	panicError(err)
+
+	for _, d := range rPcl.Departments {
+
+		dptHexVal := strings.ReplaceAll(d.HexId, "0x", "")
+
+		dptIntVal, _ := strconv.ParseUint(dptHexVal, 16, 32)
+
+		department := Department{
+			HexId:             d.HexId,
+			Name:              d.Name,
+			ProcessedCommands: make(map[string]string),
+		}
+		cmdsRaw := d.RawCommands
+		cmdsRaw = strings.ReplaceAll(cmdsRaw, "\n", "")
+		cmdsRaw = strings.ReplaceAll(cmdsRaw, " ", "")
+		cmdsRaw = strings.ReplaceAll(cmdsRaw, "0x", "")
+		cmdsRaw = strings.ReplaceAll(cmdsRaw, "\t", "")
+
+		cmds := strings.Split(cmdsRaw, ",")
+
+		for _, c := range cmds {
+			if c == "" {
+				continue
+			}
+			cs := strings.Split(c, "=")
+			department.ProcessedCommands[cs[1]] = cs[0]
+		}
+
+		pcl.Departments[uint8(dptIntVal)] = department
+	}
+	fmt.Println(pcl)
 }

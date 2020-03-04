@@ -43,17 +43,10 @@ func (pf *Flows) persist() {
 		pathName, err := filepath.Abs(fmt.Sprintf("%v%v", "output/", k))
 
 		f, err := os.OpenFile(pathName, os.O_WRONLY|os.O_CREATE, 0666)
-
-		if err != nil {
-			fmt.Println(err)
-		}
+		panicError(err)
 
 		r, err := pcapgo.NewNgWriter(f, layers.LinkTypeEthernet)
-
-		if err != nil {
-			fmt.Println(err)
-		}
-
+		logError(err)
 		for _, p := range v {
 			err = r.WritePacket(p.Metadata().CaptureInfo, p.Data())
 		}

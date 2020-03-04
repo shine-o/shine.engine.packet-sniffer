@@ -23,6 +23,7 @@ var shine Shine
 
 func init() {
 	viperConfig()
+	initPCList()
 	// remove output folder if exists, create it again
 	dir, err := filepath.Abs("output/")
 	fmt.Println(dir)
@@ -116,6 +117,8 @@ func viperConfig() {
 	viper.SetDefault("protocol.log.client", true)
 
 	viper.SetDefault("protocol.log.server", true)
+
+	viper.SetDefault("protocol.nc-data", "protocol-commands.yml")
 }
 
 func logError(e error) {
