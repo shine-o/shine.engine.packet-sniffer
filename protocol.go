@@ -177,5 +177,4 @@ func initPCList() {
 
 		pcl.Departments[uint8(dptIntVal)] = department
 	}
-	fmt.Println(pcl)
 }
