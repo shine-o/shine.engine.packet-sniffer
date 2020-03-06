@@ -1,13 +1,21 @@
-package main
+package lib
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcap"
 	"github.com/google/gopacket/tcpassembly"
+	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"log"
+	"os"
+	"os/signal"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -52,6 +60,126 @@ type service struct {
 
 var xorKey []byte
 var cs *activeStreams
+var iface string
+var snaplen int
+var filter string
+var shine Shine
+
+func captureConfig()  {
+	initPCList()
+	// remove output folder if exists, create it again
+	dir, err := filepath.Abs("output/")
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+
+	} else {
+		err = os.RemoveAll(dir)
+		logError(err)
+	}
+
+	err = os.Mkdir(dir, 0700)
+	logError(err)
+
+	iface = viper.GetString("network.interface")
+	snaplen = viper.GetInt("network.snaplen")
+
+	serverIp := viper.GetString("network.serverIp")
+	startPort := viper.GetString("network.portRange.start")
+	endPort := viper.GetString("network.portRange.end")
+	portRange := fmt.Sprintf("%v-%v", startPort, endPort)
+
+	filter = fmt.Sprintf("(dst net %v or src net %v) and (dst portrange %v or src portrange %v)", serverIp, serverIp, portRange, portRange)
+
+	xorKey, err = hex.DecodeString(viper.GetString("protocol.xorTableHexString"))
+	shine.mu.Lock()
+	shine.knownServices = make(map[int]*service)
+	if viper.IsSet("protocol.services") {
+		// snippet for loading yaml array
+		services := make([]map[string]string, 0)
+		var m map[string]string
+		servicesI := viper.Get("protocol.services")
+		servicesS := servicesI.([]interface{})
+		for _, s := range servicesS {
+			serviceMap := s.(map[interface{}]interface{})
+			m = make(map[string]string)
+			for k, v := range serviceMap {
+				m[k.(string)] = v.(string)
+			}
+			services = append(services, m)
+		}
+		for _, v := range services {
+			port, err := strconv.Atoi(v["port"])
+			logError(err)
+			shine.knownServices[port] = &service{name: v["name"]}
+		}
+	} else {
+		shine.knownServices[9000] = &service{name: "Account"}
+		shine.knownServices[9311] = &service{name: "AccountLog"}
+		shine.knownServices[9411] = &service{name: "Character"}
+		shine.knownServices[9511] = &service{name: "GameLog"}
+		shine.knownServices[9010] = &service{name: "Login"}
+		shine.knownServices[9110] = &service{name: "WorldManager"}
+		shine.knownServices[9210] = &service{name: "Zone00"}
+		shine.knownServices[9212] = &service{name: "Zone01"}
+		shine.knownServices[9214] = &service{name: "Zone02"}
+		shine.knownServices[9216] = &service{name: "Zone03"}
+		shine.knownServices[9218] = &service{name: "Zone04"}
+	}
+	shine.mu.Unlock()
+}
+
+func Capture(cmd *cobra.Command, args []string) {
+	captureConfig()
+	pf := &Flows{
+		pfm: make(map[string][]gopacket.Packet),
+	}
+
+	ctx := context.Background()
+
+	// trap Ctrl+C and call cancel on the context
+	ctx, cancel := context.WithCancel(ctx)
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	defer func() {
+		signal.Stop(c)
+		cancel()
+	}()
+
+	go listen(ctx, pf)
+
+	select {
+	case <-c:
+		pf.persist()
+		//persistXorKeys()
+		cancel()
+	case <-ctx.Done():
+		pf.persist()
+	}
+
+}
+
+func listen(ctx context.Context, pf *Flows) {
+	cs = &activeStreams{
+		fromClient: make(map[int]*shineStream),
+		fromServer: make(map[int]*shineStream),
+	}
+	sf := &shineStreamFactory{}
+	sp := tcpassembly.NewStreamPool(sf)
+	a := tcpassembly.NewAssembler(sp)
+
+	if handle, err := pcap.OpenLive(iface, int32(snaplen), true, pcap.BlockForever); err != nil {
+		panic(err)
+	} else if err := handle.SetBPFFilter(filter); err != nil { //
+		panic(err)
+	} else {
+		packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+		for packet := range packetSource.Packets() {
+			go pf.add(packet)
+			tcp := packet.TransportLayer().(*layers.TCP)
+			a.AssembleWithTimestamp(packet.NetworkLayer().NetworkFlow(), tcp, packet.Metadata().Timestamp)
+		}
+	}
+}
+
 
 func (fsf *shineStreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
 	src, _ := strconv.Atoi(transport.Src().String())

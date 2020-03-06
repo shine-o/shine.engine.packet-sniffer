@@ -40,4 +40,4 @@ protocol:
   log:
     client: true
     server: true
-  nc-data: "protocol-commands.yml"
+  nc-data: "defaults/protocol-commands.yml"
