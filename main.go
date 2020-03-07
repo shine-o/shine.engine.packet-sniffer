@@ -15,7 +15,7 @@ limitations under the License.
 */
 package main
 
-import "isya.engine.packet-sniffer/cmd"
+import "shine.engine.packet-sniffer/cmd"
 
 func main() {
 	cmd.Execute()

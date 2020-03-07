@@ -57,7 +57,7 @@ func init() {
 	// Cobra supports persistent flags, which, if defined here,
 	// will be global for your application.
 
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.isya.engine.psniffer.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.shine.engine.psniffer.yaml)")
 
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
@@ -77,17 +77,16 @@ func initConfig() {
 			os.Exit(1)
 		}
 
-		// Search config in home directory with name ".isya.engine.psniffer" (without extension).
+		// Search config in home directory with name ".shine.engine.psniffer" (without extension).
 		viper.AddConfigPath(home)
-		viper.SetConfigName(".isya.engine.psniffer")
+		viper.SetConfigName(".shine.engine.psniffer")
 	}
-
 
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
 		fmt.Println("Using config file:", viper.ConfigFileUsed())
 	}
-	
+
 	required := []string{
 		"network.interface",
 		"network.serverIp",
@@ -113,4 +112,3 @@ func initConfig() {
 
 	viper.SetDefault("protocol.log.server", true)
 }
-

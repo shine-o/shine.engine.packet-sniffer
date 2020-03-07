@@ -17,7 +17,7 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
-	"isya.engine.packet-sniffer/lib"
+	"shine.engine.packet-sniffer/lib"
 )
 
 // captureCmd represents the capture command

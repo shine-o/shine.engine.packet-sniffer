@@ -92,7 +92,7 @@ func (pcb *ProtocolCommandBase) RawData() []byte {
 		r = append(r, uint8(0))
 		r = append(r, byte(pcb.length))
 	}
-	r = append(r, byte(pcb.operationCode))
+	//r = append(r, byte(pcb.operationCode))
 	r = append(r, pcb.data...)
 	return r
 }
@@ -106,6 +106,7 @@ func (pcb *ProtocolCommandBase) String() string {
 		Command       string `json:"command"`
 		OperationCode uint16 `json:"opCode"`
 		Data          string `json:"data"`
+		RawData       string `json:"rawData"`
 		FriendlyName  string `json:"friendlyName"`
 	}
 
@@ -116,6 +117,7 @@ func (pcb *ProtocolCommandBase) String() string {
 		Command:       fmt.Sprintf("%X", pcb.command),
 		OperationCode: pcb.operationCode,
 		Data:          hex.EncodeToString(pcb.data),
+		RawData:       hex.EncodeToString(pcb.RawData()),
 	}
 
 	if dpt, ok := pcl.Departments[uint8(pcb.department)]; ok {
