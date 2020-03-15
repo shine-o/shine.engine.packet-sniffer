@@ -19,5 +19,4 @@ func TestClientStreams(t *testing.T) {
 	cs["Login"] = "hexstreamgoeshere"
 
 	// for each resulting packet, check against a list of known Department Codes and Commands
-
 }

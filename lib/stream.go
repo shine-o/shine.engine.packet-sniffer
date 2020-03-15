@@ -149,7 +149,6 @@ func Capture(cmd *cobra.Command, args []string) {
 	select {
 	case <-c:
 		pf.persist()
-		//persistXorKeys()
 		cancel()
 	case <-ctx.Done():
 		pf.persist()
@@ -426,8 +425,14 @@ func packetBoundary(offset int, b []byte) (int, string) {
 		var tempB []byte
 		tempB = append(tempB, b[offset:]...)
 		br := bytes.NewReader(tempB)
-		br.ReadAt(tempB, 1)
-		binary.Read(br, binary.LittleEndian, &pLen)
+
+		if _, err := br.ReadAt(tempB, 1); err != nil {
+			logError(err)
+		}
+
+		if err := binary.Read(br, binary.LittleEndian, &pLen); err != nil {
+			logError(err)
+		}
 		return int(pLen), "big"
 	} else {
 		var pLen uint8
